@@ -1,0 +1,451 @@
+---
+title: "Analyze free-choice image norming experiment"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+This notebook analyzes the results of the norm_pics_freechoice experiment, where participants used 3 adjs to describe imgs of people they saw. They were also asked qs on location (where person was from), occupation, and how they think the person spoke (v. open-ended questions). 
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(tm)
+library(wordcloud)
+library(ggplot2)
+library(lmerTest)
+library(datapasta)
+library(lexicon)
+library(cowplot)
+library(ggpubr)
+library(dutchmasters)
+library(stargazer)
+library(textdata)
+
+fullPalette <- c("#394165", "#A65141")
+toughPalette <- c("#394165")
+valleyPalette <-c("#A65141")
+
+theme_set(theme_minimal())
+source("../../../shared_resources/get_glasgow_norms.R")
+source("../../../shared_resources/helpers.R")
+
+```
+
+# Get data, tidy / clean data
+```{r}
+pilot <- read.csv('../data/raw/norm_imgs_freechoice_pilot-trials.csv')
+free <- read.csv('../data/raw/norm_imgs_freechoice_full-trials.csv')
+
+n_distinct(pilot$workerid)
+n_distinct(free$workerid)
+
+exclude_pilot_ids <- c(2,6)
+pilot.tidy <- pilot %>%
+  filter(!workerid  %in% exclude_pilot_ids)
+
+exclude_ids <- c(4, 24, 49) # Based on qualitative determination: non-sensical answers, repeating training trial of old man, etc. 
+free.clean <- free %>%
+  filter(!workerid  %in% exclude_ids) 
+
+pilot.tidy$age <- as.factor(pilot.tidy$age)
+free.clean <- bind_rows(pilot.tidy, free.clean)
+
+free.tidy <- free.clean %>%
+  select(stim, workerid, adj1, adj2, adj3, occupation, howspeak, age, wherefrom, extra_descript)%>%
+  mutate(persona = str_split_fixed(stim, '_', n=3)[,1], 
+         head = str_split_fixed(stim, '_', n=3)[,2], 
+         bod = str_split_fixed(stim, '_', n=3)[,3]) %>%
+  mutate(adj1 = str_to_lower(adj1, locale = 'en'), 
+         adj2 = str_to_lower(adj2, local = 'en'), 
+         adj3 = str_to_lower(adj3, local = 'en'), 
+         occupation = str_to_lower(occupation, local = 'en'), 
+         howspeak = str_to_lower(howspeak, local = 'en'), 
+         wherefrom = str_to_lower(wherefrom, local = 'en'))
+
+summary(free)
+sd(free$Answer.time_in_minutes)
+
+n_distinct(free.clean$workerid)
+n_distinct(pilot.tidy$workerid)
+
+```
+
+
+# ADJECTIVES
+
+## wrangle
+Frequency counts by persona (Tough or Valley), and freq counts relative to n of each persona judgments 
+(i.e., how common was a particular adjective judgment for a particular persona )
+```{r}
+freecounter <- free.tidy %>%
+  gather(adjorder, adj, adj1:adj3) %>%
+  mutate(adj = gsub(' ', '', adj)) %>%
+  group_by(persona)%>%
+  count(adj)%>%
+  mutate(total_judgments_persona = sum(n), freq = n/total_judgments_persona,
+         adj = as.factor(adj))
+
+```
+
+Frequency counts by individual stim
+```{r}
+ind_adjs <- free.tidy %>%
+  gather(adjorder, adj, adj1:adj3) %>%
+  mutate(adj = gsub(' ', '', adj)) %>%
+  group_by(stim)%>%
+  count(adj) %>%
+  mutate(total_judgments_stim = sum(n)) %>%
+  mutate (freq = n/total_judgments_stim)
+```
+
+
+Unique and shared words
+```{r}
+# what words are shared by both?
+freecounter.spread <- freecounter %>%
+  select(-total_judgments_persona, -freq)%>%
+  spread(persona, n) %>%
+  mutate_all(~replace(., is.na(.), 0)) 
+
+shared_words <- freecounter.spread %>%
+  filter(t!= 0 & v != 0) %>%
+  arrange(desc(t))
+shared_words
+
+# what words are unique to each persona?
+unique_toughs <- freecounter.spread %>%
+  filter(t!= 0 & v == 0) %>%
+  rename(n = 't') %>%
+  mutate(persona_type = 't') %>%
+  select(-v) %>%
+  arrange(desc(n))
+unique_toughs
+
+unique_valleys <- freecounter.spread %>%
+  filter(t== 0 & v != 0)%>%
+  rename(n = 'v') %>%
+  mutate(persona_type = 'v') %>%
+  select(-t) %>%
+  arrange(desc(n))
+unique_valleys
+```
+
+## Visualize top Tough and Valley words
+```{r}
+top15_unique_t <- unique_toughs[0:15,]
+top15_unique_v <- unique_valleys[0:15,]
+
+top15 <- bind_rows(top15_unique_t, top15_unique_v)
+
+#viz
+unique_t.bar <- top15_unique_t %>%
+  ggplot(aes(x=reorder(adj, n), y=n, fill = persona_type))+
+  geom_col(stat="identity")+
+  coord_flip() +
+   ggtitle("Tough adjectives") +
+  xlab("Adjective") +
+  ylab("No. of occurrences")+
+  scale_fill_manual(values=toughPalette)+
+  scale_y_continuous(breaks = seq(from = 1, to = 12, by = 1)) +
+  theme(axis.text.x  = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        axis.title.y = element_blank(),
+        #axis.title.x = element_blank(),
+        #axis.title.y = element_text(size = 12, face="bold"),
+        axis.title.x = element_text(size = 12),
+        legend.position = "none")
+unique_t.bar
+
+
+
+unique_v.bar <- top15_unique_v %>%
+  ggplot(aes(x=reorder(adj, n), y=n, fill = persona_type))+
+  geom_col(stat="identity")+
+  coord_flip() +
+  ggtitle("Valley Girl adjectives") +
+  xlab("Adjective") +
+  ylab("No. of occurrences")+
+  scale_fill_manual(values=valleyPalette)+
+  scale_y_continuous(breaks = seq(from = 1, to = 12, by = 1)) +
+  theme(axis.text.x  = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        axis.title.y = element_blank(),
+        #axis.title.x = element_blank(),
+        #axis.title.y = element_text(size = 12, face="bold"),
+        axis.title.x = element_text(size = 12),
+        legend.position = "none")
+unique_v.bar
+
+ theme(axis.title.x = element_blank(),
+          axis.text.x = element_text(color="black", size=16),
+          axis.text.y = element_text(size = 14),
+          axis.title.y = element_text(color="black", size=16),
+          legend.title = element_text(color="black", size=16),
+          legend.text = element_text(color="black", size=14),
+          )
+
+top15_adj.plot <- ggarrange(unique_t.bar, unique_v.bar)
+top15_adj.plot
+
+ggsave('../plots/top15_adjs.png', top15_adj.plot, width=9, height=3)
+```
+
+
+
+##  Quantify impressions with Glasgow Norms; model VAD and gender
+```{r}
+# get glasgow norms
+norms <- norms %>% rename(adj = words)
+
+free.tidy$persona <- as.factor(free.tidy$persona)
+noncounted <- free.tidy %>%
+  gather(adjorder, adj, adj1:adj3) %>%
+  mutate(adj = gsub(' ', '', adj)) %>%
+  group_by(persona) %>%
+  select(stim, adjorder, adj, workerid)
+
+norms_adjs <- right_join(norms, noncounted, by = 'adj')
+norms_adjs <- norms_adjs %>% 
+  filter(!is.na(length)) #get rid of those that dont have an entry in norms lexicon - this will exclude misspellings etc for time being
+norms_adjs
+norms_adjs$persona <- relevel(norms_adjs$persona, ref = 't')
+
+#linear models for each dimension (W random effects)
+gendr <- lmer(gend_mean ~ persona + (1|stim) , data = norms_adjs)
+summary(gendr)
+
+gendr <- lmer(gend_mean ~ persona + (1|stim) + (1|workerid) , data = norms_adjs)
+summary(gendr)
+
+arous <- lmer(arous_mean ~ persona + (1|stim), data = norms_adjs)
+summary(arous)
+
+val <- lmer(val_mean ~ persona + (1|stim)+ (1|workerid), data = norms_adjs)
+summary(val)
+
+dom <- lmer(dom_mean ~ persona + (1|stim)+ (1|workerid), data = norms_adjs)
+summary(dom)
+
+#Just as sanity check: a dv that really shouldn't differ across personas ('imageability' - how imaginable something is)
+imag <- lmer(imag_mean ~ persona + (1|stim)+ (1|workerid), data = norms_adjs)
+summary(imag)
+```
+nb - gender: 1 = female, 7= male 
+arousal: 1 = dull, 7 = excited
+valence: 1 = bad, 7 = good
+dom: 1 = poweless, 7 = in control
+
+Valley descriptors more female, higher arousal, higher valence, more 'dominant' (but DOM is correlated with VALENCE - "VAL × DOM (r = .68; the more positive a word is, the more it provokes feelings of dominance" - Glasgow Norms Scott et al")
+
+### Plot the VAD/Gender ratings associated with Tough/Valley words
+
+#### gender 
+```{r}
+gend.df <- norms_adjs %>%
+  group_by(persona) %>%
+  summarise(gendmean_allwords = mean(gend_mean), CI.Low = ci.low(gend_mean), CI.High = ci.high(gend_mean)) %>%
+  mutate(YMin = gendmean_allwords - CI.Low, YMax = gendmean_allwords + CI.High)
+
+gend.plot <- ggplot(gend.df, aes(x=persona, y= gendmean_allwords)) +
+  geom_bar(stat = "identity", aes(fill = persona)) +
+  geom_errorbar(aes(ymin=YMin,ymax=YMax), width=.25) +
+  scale_fill_manual(values=fullPalette, name = "Persona Type", breaks= c("t", "v"), labels = c("Tough", "Valley Girl"))+
+  theme(
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    axis.title.y = element_text(size = 14),
+    axis.text.y = element_text(size = 12),
+    axis.title.x=element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank())+
+  expand_limits(y=c(1, 9))+
+  scale_y_continuous(breaks = seq(from = 1, to = 9, by = 1)) +
+  ylab("Gender association (1 = feminine, 9 = masculine)")
+
+gend.plot
+```
+
+
+#### valence
+```{r}
+valence.df <- norms_adjs %>%
+  group_by(persona) %>%
+  summarise(valence_allwords = mean(val_mean), CI.Low = ci.low(val_mean), CI.High = ci.high(val_mean)) %>%
+  mutate(YMin = valence_allwords - CI.Low, YMax = valence_allwords + CI.High)
+
+val.plot <- ggplot(valence.df, aes(x=persona, y= valence_allwords)) +
+  geom_bar(stat = "identity", aes(fill = persona)) +
+  geom_errorbar(aes(ymin=YMin,ymax=YMax), width=.25) +
+  scale_fill_manual(values=fullPalette, name = "Persona Type", breaks= c("t", "v"), labels = c("Tough", "Valley Girl"))+
+  theme(
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    axis.title.y = element_text(size = 14),
+    axis.text.y = element_text(size = 12),
+    axis.title.x=element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank())+
+  expand_limits(y=c(1, 9))+
+  ylab("Valence (1 = negative, 9 = positive)")
+val.plot
+```
+
+#### arousal
+```{r}
+arouse.df <- norms_adjs %>%
+  group_by(persona) %>%
+  summarise(arouse_allwords = mean(arous_mean), CI.Low = ci.low(arous_mean), CI.High = ci.high(arous_mean)) %>%
+  mutate(YMin = arouse_allwords - CI.Low, YMax = arouse_allwords + CI.High)
+
+arous.plot <- ggplot(arouse.df, aes(x=persona, y= arouse_allwords)) +
+  geom_bar(stat = "identity", aes(fill = persona)) +
+  geom_errorbar(aes(ymin=YMin,ymax=YMax), width=.25) +
+  scale_fill_manual(values=fullPalette, name = "Persona Type", breaks= c("t", "v"), labels = c("Tough", "Valley Girl"))+
+  theme(
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    axis.title.y = element_text(size = 14),
+    axis.text.y = element_text(size = 12),
+    axis.title.x=element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank())+
+  expand_limits(y=c(1, 9))+
+  ylab("Arousal (1 = dull, 9 = excited)")
+arous.plot
+
+```
+
+#### all in one plot
+```{r}
+vadjectives <- ggarrange (gend.plot, val.plot, arous.plot,
+                   ncol = 3,
+                   common.legend = TRUE, legend = "bottom")
+vadjectives
+ggsave('../plots/vadjectives.png', vadjectives, width =10, height =5)
+
+```
+
+
+# Where from? (where in the US are Ts/Vs perceived to be from?)
+```{r}
+#Tidy up free input (bin categories reasonably)
+free.tidy$wherefrom <- as.factor(free.tidy$wherefrom)
+levels(free.tidy$wherefrom)
+
+free.tidy$wherefrom <- as.character(free.tidy$wherefrom)
+free.tidy <- free.tidy %>%
+  mutate(wherefrom.tidy = ifelse(wherefrom == 'american' | wherefrom ==  'united states', 'america',
+                          ifelse(wherefrom == 'ca' | wherefrom == 'californa' | wherefrom == 'hollywood' | wherefrom == 'los angeles' | wherefrom == 'san francisco', 'california', 
+                          ifelse(wherefrom == 'fl', 'florida',
+                          ifelse(wherefrom == 'mi', 'michigan',
+                          ifelse(wherefrom == "ma", 'massachusetts',
+                          ifelse(wherefrom == "portland oregon" | wherefrom == "portland", "oregon",
+                          ifelse(wherefrom == "washingston"| wherefrom == "seattle", "washington",
+                          ifelse(wherefrom == "philadeplia", "pennsylvania",
+                          ifelse(wherefrom == "chicago", "illinois",
+                          ifelse(wherefrom ==  "atlanta", "georgia", 
+                          ifelse(wherefrom == 'new york ' | wherefrom == "ny" |wherefrom == "new york, ny", 'new york', wherefrom))))))))))))
+free.tidy$wherefrom.tidy <- as.factor(free.tidy$wherefrom.tidy)
+levels(free.tidy$wherefrom.tidy)
+
+places <- free.tidy %>%
+  group_by(persona)%>%
+  count(wherefrom.tidy) %>%
+  mutate(total_place_judgments = sum(n)) %>%
+  mutate (freq = n/total_place_judgments)
+```
+
+## Perceived origins by stim
+```{r}
+places.stim <- free.tidy %>%
+  group_by(stim,persona)%>%
+  count(wherefrom.tidy) %>%
+  mutate(total_place_judgments_stim = sum(n)) %>%
+  mutate (freq = n/total_place_judgments_stim)
+  
+bicoastal <- places.stim %>%
+  filter(wherefrom.tidy == 'california' | wherefrom.tidy == 'new york') 
+
+  ggplot(bicoastal, aes( x = stim, y = n, fill = wherefrom.tidy)) +
+  geom_bar(stat = "identity", position = 'dodge') +
+    theme(axis.text.x=element_text(angle = -270, hjust = 0)) 
+  View(places.stim)
+```
+
+```{r}
+free.tidy$wherefrom.tidy <- as.factor(free.tidy$wherefrom.tidy)
+free.tidy$wherefrom.tidy <- relevel(free.tidy$wherefrom.tidy, ref = 'california')
+free.tidy$persona <- as.factor(free.tidy$persona)
+free.tidy$persona <- relevel(free.tidy$persona, ref = 't')
+```
+
+## Logistic regression models for being 'from' CA/NY
+```{r}
+where.df <- free.tidy %>%
+  mutate(CA = ifelse(wherefrom.tidy == 'california', 1, 0), NY = ifelse(wherefrom.tidy == 'new york', 1, 0))
+where.df
+
+ca.mod <- glmer(CA ~ persona + (1|stim), family = binomial, data = where.df)
+summary(ca.mod)
+#Valleys are more likely than Toughs to be 'from' CA
+ny.mod <- glmer(NY ~ persona + (1|stim), family = binomial, data = where.df)
+summary(ny.mod)
+```
+
+# Perceived occupation 
+(what do participants think Toughs and Valleys do for a living?)
+```{r}
+occupation <- free.tidy %>%
+  group_by(persona)%>%
+  count(occupation)
+
+toughs_occ <- occupation %>%
+  filter(persona == 't')
+
+valls_occ <- occupation %>%
+  filter(persona == 'v')
+
+tocc_cloud <- wordcloud(toughs_occ$occupation, toughs_occ$n, min.freq = 1)
+vocc_cloud <- wordcloud(valls_occ$occupation, valls_occ$n, min.freq = 1)
+
+occupation.spread <- occupation%>%
+  spread(persona, n) %>%
+  mutate_all(~replace(., is.na(.), 0)) 
+
+shared_occupation <- occupation.spread  %>%
+  filter(t!= 0 & v != 0) %>%
+  arrange(desc(t))
+
+unique_toughs_occ <- occupation.spread  %>%
+  filter(t!= 0 & v == 0) %>%
+  rename(n = 't') %>%
+  mutate(persona_type = 't') %>%
+  select(-v) %>%
+  arrange(desc(n))
+unique_toughs_occ
+
+unique_valleys_occ <- occupation.spread  %>%
+  filter(t== 0 & v != 0)%>%
+  rename(n = 'v') %>%
+  mutate(persona_type = 'v') %>%
+  select(-t) %>%
+  arrange(desc(n))
+unique_valleys_occ 
+```
+
+#Qualitatively code speaking styles
+```{r}
+write.csv(free.tidy, '../data/clean/freechoiceresponses_tocode.csv')
+coded <- read.csv('../data/clean/freechoiceresponses_tocode.csv' , skip = 1)
+
+coded.tidy <- coded %>%
+  select(stim, persona, howspeak.1, vocalfry:prestige..socioeconomic.)
+```
+
+Speaking style results
+- 2 mentions of creak ('vocal fry'), one each for a V and a T
+- 4 mentions of valley girl (3V, 1T)
+- 5 mentions of 'slang' (1V, 4T)
+- Pitch: 5 mentions of low pitch (all T), 9 mentions of high pitch (all V)

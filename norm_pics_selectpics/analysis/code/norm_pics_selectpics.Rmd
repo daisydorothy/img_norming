@@ -1,0 +1,532 @@
+---
+title: "Analyze select-pics image norming experiment"
+output: html_notebook
+---
+This notebook analyzes the results of the second img norming experiment (norm_pics_selectpics) where participants select as many / few of the (six) images that they felt corresponded to the adjective displayed on the screen. 
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(datapasta)
+library(directlabels)
+library(lme4)
+source("../../../shared_resources/helpers.R")
+fullPalette <- c("#394165", "#A65141")
+toughPalette <- c("#394165")
+valleyPalette <-c("#A65141")
+```
+
+
+#Get data, wrangle data 
+```{r}
+data <- read.csv('../data/raw/norm_imgs_selectpics_real-trials.csv')
+n_distinct(data $workerid)
+
+data.tidy <- data %>%
+  select(-Answer.condition) %>%
+  mutate(full_set = gsub("\\[|]|'|,", '', full_set)) %>%
+  mutate(ladies_selected = gsub("\\[|]|'|,", '', ladies_selected)) %>%
+  mutate(trial = workerid) %>%
+  group_by(trial) %>%
+  mutate(presentation_in_trial = row_number()) %>%
+  ungroup 
+
+full_set <- data.tidy %>%
+  select(-ladies_selected) %>%
+  mutate(ladies = strsplit(as.character(full_set), " ")) %>% 
+    unnest(ladies) %>%
+  unique()
+
+selected <- data.tidy %>%
+  select(-full_set) %>%
+  mutate(ladies = strsplit(as.character(ladies_selected), " ")) %>% 
+    unnest(ladies) %>%
+  unique()
+
+
+joined <- full_join(full_set, selected, by = c("trial", "presentation_in_trial", "ladies"))
+joined.tidy <- joined %>%
+  select(-full_set,-ladies_selected) %>%
+  mutate(yesorno = ifelse(is.na(descriptor.y), 0, 1)) %>%
+  select(-descriptor.y, -Answer.time_in_minutes.y, -rt.y, -workerid.y) %>%
+  rename(descriptor = descriptor.x, total_answer_time = Answer.time_in_minutes.x, rt = rt.x, workerid = workerid.x) %>%
+  mutate(persona = str_split_fixed(ladies, '_', n=3)[,1], 
+         head = str_split_fixed(ladies, '_', n=3)[,2], 
+         bod = str_split_fixed(ladies, '_', n=3)[,3]) %>%
+  mutate(bhair = ifelse(persona == 'v' & head == 'h1' | 
+                          persona == 'v' & head == 'h2' | 
+                          persona == 'v' & head == 'h3' |
+                          persona == 'v' & head == 'h5' | 
+                          persona == 'v' & head == 'h6', 1, 0)) %>%
+  mutate(pants = ifelse (persona == 'v' & bod == 'b2' | 
+                           persona == 'v' & bod == 'b6' | 
+                           persona == 't' & bod == 'b2' |
+                           persona == 't' & bod == 'b3' |
+                           persona == 't' & bod == 'b4' |
+                           persona == 't' & bod == 'b6', 1, 0))
+
+summary(joined.tidy)
+
+sd(joined.tidy$total_answer_time)
+```
+
+## filter bad actors (bots, click farms)
+```{r}
+attn.df <- joined.tidy %>%
+  filter(descriptor == 'with blonde hair' | descriptor == 'wearing pants') %>% # included to filter out bots etc
+  group_by(workerid, descriptor) %>%
+  mutate(bhair_acc = ifelse(descriptor == 'with blonde hair' & yesorno == bhair,1,
+                            ifelse(descriptor == 'with blonde hair' & yesorno != bhair, 
+                                   0, NA)),
+         pants_acc = ifelse(descriptor == 'wearing pants' & yesorno == pants,1,
+                            ifelse(descriptor == 'wearing pants' & yesorno != pants, 
+                                   0, NA))) %>%
+ summarize(bhair_total_acc = mean(bhair_acc), na.rm = TRUE, pants_total_acc = mean(pants_acc), na.rm = TRUE)%>%
+  select(-descriptor, -na.rm) %>%
+  gather(var, val, bhair_total_acc, pants_total_acc) %>%
+  na.omit()%>%
+  unique() %>%
+  spread(var, val) %>%
+  mutate(total_acc = mean (bhair_total_acc + pants_total_acc)/2)
+
+#total accuracy
+acc.plot <- attn.df %>%
+  gather(var, val, bhair_total_acc:total_acc) %>%
+  ggplot(aes(x=val, fill = var )) +
+  geom_bar(position ='dodge') 
+acc.plot
+
+#EXAMINE BAD ACTORS
+#don't filter on total accuracy, as this could mean NO attn being paid to one of the catchers. Instead, allow 75% accuracy for each (ie. can get two wrong each time)
+bad <- attn.df %>%
+  filter(bhair_total_acc < 0.75 | pants_total_acc < 0.75) 
+
+exclude_ids <- bad$workerid 
+clean <- joined.tidy %>%
+  filter(!workerid  %in% exclude_ids)
+write.csv(clean, '../data/clean/cleaned_selectpics_data.csv')
+
+# reporting N and N exclusions for writeup 
+n_total <- as.data.frame(clean$workerid)%>%
+  unique()
+n_total
+
+clean$ladies <- as.factor(clean$ladies)
+n_ladies <- clean %>%
+  filter(descriptor != 'wearing pants' )%>%
+  filter(descriptor != 'with blonde hair')%>%
+  group_by(ladies) %>%
+  mutate(n_judgments = n())
+n_ladies
+summary(n_ladies)
+
+n_distinct(clean$workerid)
+```
+
+
+```{r}
+judgments <- clean %>% 
+  filter(descriptor != 'wearing pants' )%>%
+  filter(descriptor != 'with blonde hair')%>%
+  group_by(persona, descriptor) %>%
+  summarise(judgments_mean = mean(yesorno), CI.Low = ci.low(yesorno), 
+            CI.High = ci.high(yesorno))%>%
+  mutate(YMin = judgments_mean - CI.Low, YMax = judgments_mean + CI.High)
+judgments
+```
+
+```{r}
+judgments_per_img <- clean %>%
+ filter(descriptor != 'wearing pants' )%>%
+  filter(descriptor != 'with blonde hair')%>%
+  group_by(ladies) %>%
+  summarize(n = n())
+judgments_per_img
+summary(judgments_per_img)
+
+```
+
+
+
+
+# visualize
+```{r}
+
+judgments$descriptor <- factor(judgments$descriptor, levels = c( "masculine", "street smart", "tough", "from New York", "feminine", "sociable", "materialistic", "from California"))
+
+descriptors.plot <- ggplot(judgments, aes(x = persona, y = judgments_mean)) +
+  geom_bar(stat = "identity", aes(fill = persona)) +
+  geom_errorbar(aes(ymin=YMin,ymax=YMax), width=.25) +
+  scale_fill_manual(values=fullPalette, name = "Persona type", breaks= c("t", "v"), labels = c("Tough", "Valley Girl"))+
+   theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 14),
+    strip.text.x = element_text(size = 14),
+    axis.title.x=element_blank(),
+    axis.ticks = element_blank(),
+    axis.title.y = element_text(size = 16),
+    axis.text.y = element_text(size =14),
+    axis.text.x = element_blank())+
+  #xlab("person") +
+
+  ylab("Mean judgment score") +
+  facet_wrap(~descriptor, ncol = 4)
+descriptors.plot
+
+ggsave('../plots/descriptor_scores.png', descriptors.plot, width=9, height=4)
+ggsave('../plots/descriptor_scores.pdf', descriptors.plot, width=9, height=4)
+
+
+```
+
+
+
+
+```{r}
+ind_judgments <- joined.tidy %>%
+  filter(descriptor != 'wearing pants' )%>%
+  filter(descriptor != 'with blonde hair')%>%
+  group_by(persona, descriptor, ladies) %>%
+  summarise(judgments_mean = mean(yesorno), total_judgments = n()) 
+
+ind.plot <- ggplot(ind_judgments, aes(x = ladies, y = judgments_mean, color = persona)) +
+  geom_jitter() +
+  facet_wrap(~descriptor) +
+  #scale_color_manual(values=tastyPalette) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) + 
+  ylab("mean ratings")
+ind.plot
+
+summary(ind_judgments) #mean 10.2 judgments per persona / descriptor
+n_distinct(ind_judgments$ladies) # 102, the full set (all imgs were judged at least once)
+
+```
+
+
+HEADS AND BODIES - for each persona, ratings of heads + bodies separated - just to explore whether one element much more 'meaningful' - i.e. bearing weight of semiotic info
+```{r}
+heads_bods <- joined.tidy %>%
+  mutate(head = gsub('h', '', str_split_fixed(ladies, '_', n=3)[,2]),  
+         body = gsub('b', '',  str_split_fixed(ladies, '_', n=3)[,3])) %>%
+  gather(var, val, head,body) %>%
+  group_by(persona, descriptor, var, val) %>%
+  summarise(judgments_mean = mean(yesorno), CI.Low = ci.low(yesorno), 
+            CI.High = ci.high(yesorno))%>%
+  mutate(YMin = judgments_mean - CI.Low, YMax = judgments_mean + CI.High)
+
+tough_hb_bar.plot <- heads_bods %>%
+  filter(persona == 't') %>%
+  ggplot(aes(x = val, y = judgments_mean, fill = var)) +
+  geom_bar(stat = 'identity', position='dodge') +
+  geom_errorbar(position='dodge', width=0.9, aes(ymin=YMin,ymax=YMax), width=.25) +
+  facet_wrap(~descriptor) +
+  #scale_fill_manual(values=tastyPalette) +
+  xlab('head/body no.') +
+  ylab("mean ratings")
+tough_hb_bar.plot
+
+val_hb_bar.plot <- heads_bods %>%
+  filter(persona == 'v') %>%
+  ggplot(aes(x = val, y = judgments_mean, fill = var)) +
+  geom_bar(stat = 'identity', position='dodge') +
+  geom_errorbar(position='dodge', width=0.9, aes(ymin=YMin,ymax=YMax), width=.25) +
+  facet_wrap(~descriptor) +
+  scale_fill_manual(values=tastyPalette) +
+  xlab('head/body no.') +
+  ylab("mean ratings")
+val_hb_bar.plot
+```
+
+MODELS 
+```{r}
+spread.df <- joined.tidy %>%
+  spread(descriptor, yesorno) %>%
+  rename(from_CA = 'from California', from_NY = 'from New York',streetsmart = 'street smart')
+spread.df
+
+fem.mod <- glmer(feminine ~ persona + (1|ladies), family = binomial, data = spread.df)
+summary(fem.mod)
+
+tough.mod <- glmer(tough ~ persona + (1|ladies), family = binomial, data = spread.df)
+summary(tough.mod)
+
+tough.mod <- glm(tough ~ persona, family = binomial, data = spread.df)
+summary(tough.mod)
+
+ny.mod <- glmer(from_NY ~ persona + (1|ladies), family = binomial, data = spread.df)
+summary(ny.mod)
+
+ca.mod <- glmer(from_CA ~ persona + (1|ladies), family = binomial, data = spread.df)
+summary(ca.mod)
+
+streetsmart.mod <- glmer(streetsmart ~ persona + (1|ladies), family = binomial, data = spread.df)
+summary(streetsmart.mod)
+
+materialistic.mod <- glmer(materialistic ~ persona + (1|ladies), family = binomial, data = spread.df)
+summary(materialistic.mod)
+
+sociable.mod <- glmer(sociable ~ persona + (1|ladies), family = binomial, data = spread.df)
+summary(sociable.mod)
+```
+
+
+
+
+
+### DETERMINING THE EXPERIMENTAL SET 
+Whiich images are the best exemplars of tough/valley?
+- calculate Tough scores (mean of all 'tough' features)
+- calculate Valley scores (mean of all 'valley' features)
+- tough_diff = tough_score - valley_score (i.e. the toughscore minus the 'penalty' valley score); vice versa
+
+```{r}
+summed <- ind_judgments %>%
+  select(persona, ladies, descriptor, judgments_mean) %>%
+  group_by(ladies) %>%
+  spread(descriptor, judgments_mean)%>%
+  rename(from_CA = 'from California', from_NY = 'from New York', streetsmart = 'street smart') %>%
+  mutate(tough_score = (masculine+tough+streetsmart+from_NY)/4)%>%
+  mutate(valley_score = (feminine+materialistic+sociable+from_CA)/4) %>%
+  mutate(tough_diff = tough_score - valley_score,
+         valley_diff = valley_score - tough_score) %>%
+  gather(score_type, score, tough_score, valley_score)
+
+summed$ladies <- as.factor(summed$ladies)
+summed$score_type <- as.factor(summed$score_type)
+
+#tough and valley scores on same plot, for Toughs
+t_both.plot <-summed %>%
+  filter(persona == 't') %>%
+  ggplot() +
+  geom_bar(stat = "identity",
+           position = 'dodge',
+           aes(x=reorder(ladies, -score), y=score, fill = score_type)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+t_both.plot
+
+#tough and valley scores on same plot, for Valleys
+v_both.plot <-summed %>%
+  filter(persona == 'v') %>%
+  ggplot() +
+  geom_bar(stat = "identity",
+           position = 'dodge',
+           aes(x=reorder(ladies, -score), y=score, fill = score_type)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+v_both.plot
+```
+- plots indicate that there don't seem to be any 'ambiguous' cases (ie where tough and valley scores are near parity)
+
+```{r}
+summed.tidy <- summed %>% 
+  mutate(score_type = recode_factor(score_type,  tough_score ="Tough score", valley_score = "Valley Girl score"))
+summed.tidy
+
+ind_scores <- summed.tidy %>%
+  ggplot() +
+  geom_histogram(aes(x=score, fill = persona))+
+  scale_fill_manual(values=fullPalette, name = "Persona type", breaks= c("t", "v"), labels = c("Tough", "Valley Girl"))+
+  facet_wrap(~score_type) +
+  xlim(0,1) +
+  ylab("No. of images")+
+  xlab("Score") +
+ theme(legend.position = "bottom",
+       axis.title.x = element_blank(),
+       legend.title = element_blank(),
+       axis.text.x = element_text(color="black", size=14),
+       axis.text.y = element_text(size = 14),
+       axis.title.y = element_text(color="black", size=16),
+       legend.text = element_text(color="black", size=14),
+       strip.text.x = element_text(color="black", size=14)
+          )
+ind_scores 
+ggsave('../plots/ind_scores.png', ind_scores, width=9, height=4)
+ggsave('../plots/ind_scores.pdf', ind_scores, width=9, height=4)
+```
+
+
+
+# Select images
+Need 24 of the best exemplars of Toughs and Valleys to use as experimental stimuli. 
+Current set includes 7 unique heads, 7 unique bodies per persona type.
+ideal world - max 3-4 head repetitions, max 3-4 body repetitions
+```{r}
+rankings <- summed %>%
+  select(persona, ladies, tough_diff, valley_diff)%>%
+  unique() %>%
+  ungroup %>%
+  #top_n(32, tough_diff) %>%
+  mutate(head = str_split_fixed(ladies, '_', n=3)[,2], 
+         bod = str_split_fixed(ladies, '_', n=3)[,3])
+
+rankings$ladies <- as.factor(rankings$ladies)
+rankings$head <- as.factor(rankings$head)
+rankings$bod <- as.factor(rankings$bod)
+
+summary(rankings)
+```
+
+
+Allow for max 5 body / head repetitions
+take top 24 
+
+TOUGHS:
+```{r}
+rankings <- arrange(rankings, desc(tough_diff))
+top_toughs <- rankings %>%
+  filter(persona == 't') %>%
+  group_by(head) %>%
+  mutate(head_count = row_number()) %>%
+  ungroup %>%
+  group_by(bod) %>%
+  mutate(bod_count = row_number()) %>%
+  mutate(yes = ifelse(head_count < 6 & bod_count < 6, 'yes', 'no')) %>%
+  filter(yes == 'yes') %>%
+  ungroup %>%
+  top_n(24, tough_diff) 
+
+top_toughs
+```
+VALLEYS
+```{r}
+rankings <- arrange(rankings, desc(valley_diff))
+top_valleys <- rankings %>%
+  filter(persona == 'v') %>%
+  group_by(head) %>%
+  mutate(head_count = row_number()) %>%
+  ungroup %>%
+  group_by(bod) %>%
+  mutate(bod_count = row_number()) %>%
+  mutate(yes = ifelse(head_count < 6 & bod_count < 6, 'yes', 'no')) %>%
+  filter(yes == 'yes') %>%
+  ungroup %>%
+  top_n(24, valley_diff) 
+top_valleys
+```
+
+MAKE NEW DIRECTORIES OF THE SELECTED TOUGHS AND VALLEYS
+```{r}
+src <- '/Users/daisydorothy/Desktop/proj/eyeballs/experiments/norming/norm_pics/norm_pics_selectpics/exp/static/images/'
+tough_src <- top_toughs %>%
+  select(ladies) %>%
+  mutate(fname = paste(src, ladies, '.jpg', sep = '')) %>%
+  select(-ladies)
+
+new_toughs <- '/Users/daisydorothy/Desktop/proj/eyeballs/design/stim_creation/imgs/selected_imgs/toughs/'
+#file.copy(tough_src$fname, new_toughs)
+
+
+valley_src <- top_valleys %>%
+  select(ladies) %>%
+  mutate(fname = paste(src, ladies, '.jpg', sep = '')) %>%
+  select(-ladies)
+
+new_valleys <- '/Users/daisydorothy/Desktop/proj/eyeballs/design/stim_creation/imgs/selected_imgs/valleys/'
+#file.copy(valley_src$fname, new_valleys)
+
+```
+
+UPDATE JUNE 2020: ING EXPERIMENT (12 CRITICAL TRIALS, NO CONTROL TRIALS WITH TWO VALLEYS OR TOUGHS)
+
+```{r}
+top_12_toughs <- rankings %>%
+  filter(persona == 't') %>%
+  group_by(head) %>%
+  mutate(head_count = row_number()) %>%
+  ungroup %>%
+  group_by(bod) %>%
+  mutate(bod_count = row_number()) %>%
+  mutate(yes = ifelse(head_count < 4 & bod_count < 4, 'yes', 'no')) %>%
+  filter(yes == 'yes') %>%
+  ungroup %>%
+  top_n(12, tough_diff) 
+
+
+
+top_12_valleys <- rankings %>%
+  filter(persona == 'v') %>%
+  group_by(head) %>%
+  mutate(head_count = row_number()) %>%
+  ungroup %>%
+  group_by(bod) %>%
+  mutate(bod_count = row_number()) %>%
+  mutate(yes = ifelse(head_count < 4 & bod_count < 4, 'yes', 'no')) %>%
+  filter(yes == 'yes') %>%
+  ungroup %>%
+  top_n(12, valley_diff) 
+top_12_valleys
+
+```
+
+
+Update October 2020; now I want 16 toughs, 16 valleys
+
+```{r}
+
+rankings$headrec <- 1
+rankings$bodrec <- 1
+top_ts <- rankings %>%
+  filter(persona == 't') %>%
+  arrange(desc(tough_diff))%>%
+  group_by(head) %>%
+  mutate("head_count" = cumsum(headrec)) %>%
+  ungroup %>%
+  group_by(bod) %>%
+  mutate("bod_count" = cumsum(bodrec)) %>%
+  select(-headrec, -bodrec) %>%
+  filter(head_count < 5 & bod_count < 5) %>%
+  ungroup %>%
+  top_n(16, tough_diff)
+
+top_vs <- rankings %>%
+  filter(persona == 'v') %>%
+  arrange(desc(valley_diff))%>%
+  group_by(head) %>%
+  mutate("head_count" = cumsum(headrec)) %>%
+  ungroup %>%
+  group_by(bod) %>%
+  mutate("bod_count" = cumsum(bodrec)) %>%
+  select(-headrec, -bodrec) %>%
+  filter(head_count < 5 & bod_count < 5) %>%
+  ungroup %>%
+  top_n(16, valley_diff)
+
+
+# Put them in their directory
+tpath <- '/Users/daisy/Desktop/proj/eyeballs/design/stim_creation/imgs/selected_imgs/toughs_resized_167x500/'
+tough_src <- top_ts %>%
+  select(ladies) %>%
+  mutate(fname = paste(tpath, ladies, '.png', sep = '')) %>%
+  select(-ladies)
+
+outdir <- '/Users/daisy/Desktop/proj/eyeballs/experiments/categorical/NSP_stims/IN/static/imgs/'
+file.copy(tough_src$fname, outdir)
+
+
+vpath <- '/Users/daisy/Desktop/proj/eyeballs/design/stim_creation/imgs/selected_imgs/valleys_resized_167x500/'
+valley_src <- top_vs %>%
+  select(ladies) %>%
+  mutate(fname = paste(vpath, ladies, '.png', sep = '')) %>%
+  select(-ladies)
+file.copy(valley_src$fname, outdir)
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```

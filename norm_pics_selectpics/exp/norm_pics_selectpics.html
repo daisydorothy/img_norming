@@ -1,0 +1,221 @@
+
+<html>
+<head>
+
+    <title>Person Descriptions</title>
+
+
+    <!-- external general utilities -->
+    <script src="js/jquery-1.11.1.min.js "></script>
+    <script src="js/jquery-ui.min.js"></script>
+    <script src="js/underscore-min.js"></script>
+    <!-- if you want to draw stuff: -->
+    <!-- <script src="../_shared/js/raphael-min.js"></script> -->
+
+    <!-- cocolab experiment logic -->
+    <script src="js/exp-V2.js"></script>
+    <script src="js/stream-V2.js"></script>
+
+    <!-- cocolab general utilities -->
+    <script src="js/mmturkey.js"></script>
+    <script src="js/browserCheck.js"></script>
+    <script src="js/utils.js"></script>
+    <!-- if you want to draw cute creatures (depends on raphael): -->
+    <!-- <script src="../_shared/js/ecosystem.js"></script> -->
+
+    <!-- experiment specific helper functions -->
+    <!-- <script src="js/local-utils.js"></script> -->
+
+    <!--CSS-->
+    <link href="css/jquery-ui.min.css" rel="stylesheet" type="text/css"/>
+    <link href="css/cocolab-style.css" rel="stylesheet" type="text/css"/>
+    <link href="css/local-style.css" rel="stylesheet" type="text/css"/>
+
+    <!-- experiment file -->
+<!--     <script src="js/rndm_stims/PIC_STIMS.js"></script>-->
+    <script src="js/IMG_stims.js"></script>
+    <script src="js/descriptors.js"></script>
+
+    <script src="js/norm_pics_selectpics.js"></script>
+
+    <!-- nb this mturk unique id was put in place on Nov 16, prior to running any element, aside from the baseline, of v2. -->
+
+    <script src="//uniqueturker.myleott.com/lib.js" type="text/javascript"></script>
+    <script type="text/javascript">
+    $(document).ready(function(){
+      var ut_id = "eyeballs_norming_stims";
+      if (UTWorkerLimitReached(ut_id)) {
+        $(".slide").hide();
+        $("body").html("You have already completed the maximum number of HITs allowed by this requester. Please click 'Return HIT' to avoid any impact on your approval rating.");
+      }});
+    </script>
+
+<!--    <script src="js/uniqueturker.js"></script>-->
+
+</head>
+
+<body onload="init();">
+  <noscript>This task requires JavaScript.</noscript>
+  <div class="slide" id="i0" >
+    <img src="images.png" alt="user" id="userpic"></img>
+    <p id="study_title"><b> Person Descriptions </b></p>
+    <p id="instruct-text"> In this task, you will see illustrated images of different people. <br>
+      You will read an adjective or short description, and you should click on every person that you think the description applies to.
+      <br><br>
+       At the end, you will then be asked a few brief questions about yourself. The task will take around 2.5 minutes. <br>
+       <br>
+       You must be a native speaker of US English to take this HIT.
+    <br>
+    <b> Please note: There will be multiple posted versions of this HIT throughout the day.<br>
+      Please attempt only ONE HIT. Thank you! </b>
+      <br>
+      <br>
+    <!--  You will see {{}} and be asked some questions about them. The HIT should take ~{{}} minutes. Please pay attention, thanks!</p> -->
+    <button id="start_button" type="button">Start</button>
+    <p id="legal"> <b>LEGAL INFORMATION:</b>
+      Please read the information below. By clicking Start, you agree that you have read the information and consent to participate in the survey.
+We invite you to participate in a research study on language production and comprehension. Your experimenter will ask you to do a linguistic task such as reading sentences or words, naming pictures or describing scenes, making up sentences of your own, or participating in a simple language game.
+<br>
+There are no risks or benefits of any kind involved in this study. You will be paid for your participation at the posted rate. If you have read this form and have decided to participate in this experiment, please understand your participation is voluntary and you have the right to withdraw your consent or discontinue participation at any time without penalty or loss of benefits to which you are otherwise entitled. You have the right to refuse to do particular tasks. Your individual privacy will be maintained in all published and written data resulting from the study. You may print this form for your records.
+<br>
+<b>CONTACT INFORMATION:</b>
+If you have any questions, concerns or complaints about this research study, its procedures, risks and benefits, you should contact the Protocol Director Meghan Sumner at (650)-725-9336.
+If you are not satisfied with how this study is being conducted, or if you have any concerns, complaints, or general questions about the research or your rights as a participant, please contact the Stanford Institutional Review Board (IRB) to speak to someone independent of the research team at (650)-723-2480 or toll free at 1-866-680-2906. You can also write to the Stanford IRB, Stanford University, 3000 El Camino Real, Five Palo Alto Square, 4th Floor, Palo Alto, CA 94306 USA.
+<br>
+If you agree to participate, please proceed to the study tasks. </p>
+  </div>
+
+
+<div class="slide"  id="training">
+  <br>
+  <p> In this task, you will see an image of a person. <br>
+    You should give three adjectives that first come to mind when you see the person.
+    <br>
+    <br>
+  <img src="training.jpg" alt="user" id="userpic"></img>
+  <br>
+  <br>
+  For example, you might describe the person above as 'kind', 'frail', and 'hardworking'.
+  <br>
+  You can use whatever adjectives you like, but try not to focus just on physical attributes, or what the person is wearing.
+  <br>
+  <br>
+  You will then be asked a few additional questions about your impressions of the person.
+  <br>
+  <br>
+  <br>
+  <button id = 'finish_training' onclick="_s.finish_training_and_go()">Click here to proceed</button> </p>
+</div>
+
+
+
+<div class="slide" id="single_trial">
+  <p class='s_frame_normal' id="insert_frame"></p>
+  <!--p> Click on all the people that look like they are: </p> -->
+  <p class='descriptor' id="insert_descriptor"></p>
+ <br>
+  <div class ="imgwrapper" id="imgwrapper">
+  </div>
+  <br>
+<table>
+  <tr>
+    <td>
+      <!-- <p id="insert_descriptor_nonapplicable"></p> -->
+      If you didn't select any of the people, explain why here:
+    </td>
+    <td>
+      <textarea id="why_no_select" rows="1" cols="25"></textarea>
+      <!--<input type="checkbox" name="not_descriptor" value="noneofthem"> -->
+    </td>
+    </tr>
+</table>
+
+  <br>
+  <button id = "continue_button" onclick="_s.continue_this()">Continue</button> </p>
+     <!--    <img id="stim_img"></img> -->
+
+<!--
+    <br>
+    <button id = 'next_qs' onclick="_s.next_qs()">Next</button> </p>
+    <p class="err_part1"><font color="red">Please enter three adjectives </font></p>
+
+    <table id = otherqs>  <tr>
+    <td align="center" >  How old do you think the person is? (give a number)</td>
+    <td> <textarea id="age" rows="1" cols="3"></textarea>  </td>
+  </tr>
+      <tr>
+      <td align="center" >    What do you think the person's occupation is? </td>
+      <td> <textarea id="occupation" rows="1" cols="30"></textarea></td>
+  </tr>
+  <tr>
+  <td align="center" >    Where in the US do you think the person is from? </td>
+  <td> <textarea id="wherefrom" rows="1" cols="30"></textarea></td>
+</tr>
+</table>
+<p id = languageq>If you had to guess, how do you think this person would speak?
+  <br>
+  <br>
+   <textarea id="howspeak" rows="3" cols="50"></textarea> </p>
+
+        <p id = "extra_descript_instruct">Do you have any other comments about the person? (Optional) </p>
+        <textarea id="extra_descript" rows="1" cols="50"></textarea>
+        <br>
+        <br> --
+     <button id = "submit_button" onclick="_s.submit_this()">Continue</button> </p>
+  <p class="err_part2"><font color="red">Please complete all non-optional questions! </font></p> -->
+  <p class="err"><font color="red">Please select, or explain why you have not selected any of them </font></p>
+  <br>
+</div>
+
+
+
+
+
+
+  <div class="slide"  id="subj_info">
+    <div class="long_form">
+      <div class="subj_info_title">About you</div>
+      <p class="info">Please answer the brief questions below.</p>
+
+      <p>First Language(s): <input type="text" id="language"/></p>
+      <label>(the language(s) spoken at home when you were a child)</label>
+
+      <p>Gender:
+        <select id="gender">
+          <label><option value=""/></label>
+          <label><option value="Male"/>Male</label>
+          <label><option value="Female"/>Female</label>
+          <label><option value="Other"/>Other</label>
+        </select>
+      </p>
+
+      <p>Age: <input type="text" id="participantage"/></p>
+
+      <p>Level of education:
+        <select id="education">
+          <label><option value="-1"/></label>
+          <label><option value="0"/>Some High School</label>
+          <label><option value="1"/>Graduated High School</label>
+          <label><option value="2"/>Some College</label>
+          <label><option value="3"/>Graduated College</label>
+          <label><option value="4"/>Hold a higher degree</label>
+        </select>
+      </p>
+
+
+      <p>(Optional) Do you have any comments about the HIT (any problems, etc.) ? </p>
+      <textarea id="comments" rows="3" cols="50"></textarea>
+      <br/>
+      <p class="err_part2"><font color="red">Please complete all non-optional questions! </font></p>
+      <br>
+      <button onclick="_s.submit()">Continue</button>
+    </div>
+  </div>
+
+
+    <div id="thanks" class="slide js" >
+      <p  class="big">Thanks for your time!</p>
+    </div>
+
+</body>
+</html>
