@@ -1,2 +1,3 @@
 *.csv
 mturk/
+*.DS_Store
